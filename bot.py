@@ -8,21 +8,31 @@ from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
-    ContextTypes
+    ContextTypes,
 )
+
+# ================= CONFIG =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 
-INTERVAL = 3
+INTERVAL = max(30, int(os.getenv("INTERVAL", "30")))
 MAX_MESSAGES = 100
 
-logging.basicConfig(level=logging.INFO)
+# ==========================================
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
 
 running = False
 sent_count = 0
 sender_task = None
+
 
 OPENERS = [
     "Hey everyone",
@@ -34,7 +44,7 @@ OPENERS = [
     "Quick question",
     "Well",
     "Interesting",
-    "Not gonna lie"
+    "Not gonna lie",
 ]
 
 MESSAGES = [
@@ -52,13 +62,13 @@ MESSAGES = [
     "what's your favorite thing to do?",
     "let's have a good conversation!",
     "any interesting updates?",
-    "how was your day?"
+    "how was your day?",
 ]
 
 
-def admin_only(update):
+def is_admin(update: Update) -> bool:
     return (
-        update.effective_user
+        update.effective_user is not None
         and update.effective_user.id == ADMIN_ID
     )
 
@@ -70,18 +80,21 @@ def random_message(previous):
             + ", "
             + random.choice(MESSAGES)
         )
+
         if message != previous:
             return message
+
     return random.choice(MESSAGES)
 
 
-async def sender(context):
+async def sender(context: ContextTypes.DEFAULT_TYPE):
     global running, sent_count
 
     previous = ""
 
     try:
         while running and sent_count < MAX_MESSAGES:
+
             message = random_message(previous)
             previous = message
 
@@ -91,42 +104,62 @@ async def sender(context):
             )
 
             sent_count += 1
+
+            logger.info(
+                "Message sent: %s/%s",
+                sent_count,
+                MAX_MESSAGES
+            )
+
             await asyncio.sleep(INTERVAL)
 
     except asyncio.CancelledError:
+        logger.info("Sender cancelled")
         raise
+
     except Exception:
-        logging.exception("Sending error")
+        logger.exception("Message sending failed")
+
     finally:
         running = False
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
     global running, sender_task, sent_count
 
-    if not admin_only(update):
+    if not is_admin(update):
         return
 
     if running:
-        await update.message.reply_text("Bot is already running.")
+        await update.message.reply_text(
+            "Bot is already running!"
+        )
         return
 
     sent_count = 0
     running = True
 
-    sender_task = asyncio.create_task(sender(context))
+    sender_task = asyncio.create_task(
+        sender(context)
+    )
 
     await update.message.reply_text(
-        "Random message bot started!\n"
+        "Random message bot started!\n\n"
         f"Interval: {INTERVAL} seconds\n"
-        f"Message limit: {MAX_MESSAGES}"
+        f"Maximum messages: {MAX_MESSAGES}"
     )
 
 
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stop(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
     global running, sender_task
 
-    if not admin_only(update):
+    if not is_admin(update):
         return
 
     running = False
@@ -134,23 +167,32 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sender_task and not sender_task.done():
         sender_task.cancel()
 
-    await update.message.reply_text("Bot stopped!")
+    await update.message.reply_text(
+        "Bot stopped successfully!"
+    )
 
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not admin_only(update):
+async def status(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    if not is_admin(update):
         return
 
     await update.message.reply_text(
-        f"Running: {running}\n"
+        f"Bot status: {'Running' if running else 'Stopped'}\n"
         f"Messages sent: {sent_count}/{MAX_MESSAGES}\n"
-        f"Interval: {INTERVAL}s"
+        f"Interval: {INTERVAL} seconds"
     )
 
 
 def main():
-    if not BOT_TOKEN or not ADMIN_ID or not CHAT_ID:
-        raise RuntimeError("Missing environment variables")
+
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN missing")
+
+    if not ADMIN_ID or not CHAT_ID:
+        raise RuntimeError("ADMIN_ID or CHAT_ID missing")
 
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -158,7 +200,15 @@ def main():
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler("status", status))
 
-    app.run_polling()
+    logger.info("Telegram bot starting...")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        app.run_polling()
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":
