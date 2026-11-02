@@ -17,8 +17,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 
-INTERVAL = max(30, int(os.getenv("INTERVAL", "30")))
-MAX_MESSAGES = 100
+INTERVAL = max(30, int(os.getenv("INTERVAL", "3")))
+MAX_MESSAGES = 1000
 
 # ==========================================
 
