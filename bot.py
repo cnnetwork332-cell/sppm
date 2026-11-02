@@ -17,7 +17,7 @@ import time
 import requests
 
 # ================== CONFIG (yahan apni values daalo) ==================
-BOT_TOKEN = "8501734917:AAEv-j5tJ795G9aDAZksIvCBQVZ4I_wxgzw"        # @BotFather se mila token
+BOT_TOKEN = "8501734917:AAFbSHa4Jd4Si6YPziVNRXeaCRcwVQvX5tw"        # @BotFather se mila token
 GROUP_ID = -1002381061691           # group ka chat id (negative number)
 ADMIN_ID = 7271198694               # aapka Telegram user id
 DELAY_SECONDS = 3                   # 2 messages ke beech gap (kam se kam 3 rakho)
