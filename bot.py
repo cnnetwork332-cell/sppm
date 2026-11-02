@@ -1,214 +1,113 @@
+"""
+Telegram VPS Test Bot
+---------------------
+- Group me random messages bhejta rehta hai (jab tak aap stop na karo)
+- Sirf ADMIN_ID wala user control kar sakta hai
+- Telegram ki rate limit (429) automatically handle karta hai
 
-import os
+Install:   pip install requests
+Run:       python3 telegram_test_bot.py
+Background: nohup python3 telegram_test_bot.py &
+"""
+
 import random
-import asyncio
-import logging
+import threading
+import time
 
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
+import requests
 
-# ================= CONFIG =================
+# ================== CONFIG (yahan apni values daalo) ==================
+BOT_TOKEN = "8501734917:AAEv-j5tJ795G9aDAZksIvCBQVZ4I_wxgzw"        # @BotFather se mila token
+GROUP_ID = -1002381061691           # group ka chat id (negative number)
+ADMIN_ID = 7271198694               # aapka Telegram user id
+DELAY_SECONDS = 3                   # 2 messages ke beech gap (kam se kam 3 rakho)
+# =====================================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-CHAT_ID = int(os.getenv("CHAT_ID", "0"))
-
-INTERVAL = max(30, int(os.getenv("INTERVAL", "3")))
-MAX_MESSAGES = 1000
-
-# ==========================================
-
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-
-logger = logging.getLogger(__name__)
-
-running = False
-sent_count = 0
-sender_task = None
-
-
-OPENERS = [
-    "Hey everyone",
-    "Hello guys",
-    "Just wondering",
-    "Random thought",
-    "By the way",
-    "Honestly",
-    "Quick question",
-    "Well",
-    "Interesting",
-    "Not gonna lie",
-]
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 MESSAGES = [
-    "how is everyone doing today?",
-    "what are you all up to?",
-    "hope everyone is having a great day!",
-    "any interesting plans for today?",
-    "what's everyone thinking about?",
-    "this group is pretty active!",
-    "anyone got something interesting to share?",
-    "hope everything is going well!",
-    "what's happening everyone?",
-    "anyone around right now?",
-    "today feels like a good day!",
-    "what's your favorite thing to do?",
-    "let's have a good conversation!",
-    "any interesting updates?",
-    "how was your day?",
+    "hi", "hello", "bye", "test", "hey", "good morning", "good night",
+    "kaise ho?", "all ok?", "ping", "pong", "VPS test running",
+    "random message", "testing 123", "hello world", "👋", "✅", "🚀",
 ]
 
-
-def is_admin(update: Update) -> bool:
-    return (
-        update.effective_user is not None
-        and update.effective_user.id == ADMIN_ID
-    )
+running = threading.Event()
+sent_count = 0
 
 
-def random_message(previous):
-    for _ in range(20):
-        message = (
-            random.choice(OPENERS)
-            + ", "
-            + random.choice(MESSAGES)
-        )
-
-        if message != previous:
-            return message
-
-    return random.choice(MESSAGES)
-
-
-async def sender(context: ContextTypes.DEFAULT_TYPE):
-    global running, sent_count
-
-    previous = ""
-
+def call(method, **params):
     try:
-        while running and sent_count < MAX_MESSAGES:
+        r = requests.post(f"{API}/{method}", json=params, timeout=40)
+        return r.json()
+    except Exception as e:
+        print("Request error:", e)
+        return {"ok": False}
 
-            message = random_message(previous)
-            previous = message
 
-            await context.bot.send_message(
-                chat_id=CHAT_ID,
-                text=message
-            )
+def send(chat_id, text):
+    res = call("sendMessage", chat_id=chat_id, text=text)
+    if not res.get("ok"):
+        # Telegram flood limit: jitna bola utna ruko
+        retry = res.get("parameters", {}).get("retry_after")
+        if retry:
+            print(f"Rate limited, {retry}s wait...")
+            time.sleep(retry + 1)
+        else:
+            print("Send failed:", res)
+    return res
 
+
+def sender_loop():
+    global sent_count
+    while True:
+        running.wait()  # /start_test tak yahin ruka rahega
+        msg = f"{random.choice(MESSAGES)} #{random.randint(1000, 9999)}"
+        res = send(GROUP_ID, msg)
+        if res.get("ok"):
             sent_count += 1
-
-            logger.info(
-                "Message sent: %s/%s",
-                sent_count,
-                MAX_MESSAGES
-            )
-
-            await asyncio.sleep(INTERVAL)
-
-    except asyncio.CancelledError:
-        logger.info("Sender cancelled")
-        raise
-
-    except Exception:
-        logger.exception("Message sending failed")
-
-    finally:
-        running = False
+            print(f"[{sent_count}] sent: {msg}")
+        time.sleep(DELAY_SECONDS)
 
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    global running, sender_task, sent_count
-
-    if not is_admin(update):
+def handle_update(update):
+    msg = update.get("message")
+    if not msg:
         return
+    user_id = msg.get("from", {}).get("id")
+    chat_id = msg["chat"]["id"]
+    text = (msg.get("text") or "").strip().lower()
 
-    if running:
-        await update.message.reply_text(
-            "Bot is already running!"
-        )
-        return
+    if user_id != ADMIN_ID:
+        return  # sirf admin ki command chalegi
 
-    sent_count = 0
-    running = True
-
-    sender_task = asyncio.create_task(
-        sender(context)
-    )
-
-    await update.message.reply_text(
-        "Random message bot started!\n\n"
-        f"Interval: {INTERVAL} seconds\n"
-        f"Maximum messages: {MAX_MESSAGES}"
-    )
-
-
-async def stop(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    global running, sender_task
-
-    if not is_admin(update):
-        return
-
-    running = False
-
-    if sender_task and not sender_task.done():
-        sender_task.cancel()
-
-    await update.message.reply_text(
-        "Bot stopped successfully!"
-    )
-
-
-async def status(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-    if not is_admin(update):
-        return
-
-    await update.message.reply_text(
-        f"Bot status: {'Running' if running else 'Stopped'}\n"
-        f"Messages sent: {sent_count}/{MAX_MESSAGES}\n"
-        f"Interval: {INTERVAL} seconds"
-    )
+    if text.startswith("/start_test"):
+        running.set()
+        send(chat_id, "✅ Test shuru. Group me messages jaa rahe hain.")
+    elif text.startswith("/stop_test"):
+        running.clear()
+        send(chat_id, f"⏹ Test band. Total sent: {sent_count}")
+    elif text.startswith("/status"):
+        state = "RUNNING" if running.is_set() else "STOPPED"
+        send(chat_id, f"Status: {state}\nSent: {sent_count}\nDelay: {DELAY_SECONDS}s")
+    elif text.startswith("/start"):
+        send(chat_id, "Commands:\n/start_test - shuru\n/stop_test - band\n/status - status")
 
 
 def main():
+    me = call("getMe")
+    if not me.get("ok"):
+        print("Bot token galat hai ya network issue:", me)
+        return
+    print("Bot chalu:", me["result"]["username"])
 
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN missing")
+    threading.Thread(target=sender_loop, daemon=True).start()
 
-    if not ADMIN_ID or not CHAT_ID:
-        raise RuntimeError("ADMIN_ID or CHAT_ID missing")
-
-    app = Application.builder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stop", stop))
-    app.add_handler(CommandHandler("status", status))
-
-    logger.info("Telegram bot starting...")
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    try:
-        app.run_polling()
-    finally:
-        loop.close()
+    offset = None
+    while True:
+        res = call("getUpdates", offset=offset, timeout=30)
+        for upd in res.get("result", []):
+            offset = upd["update_id"] + 1
+            handle_update(upd)
 
 
 if __name__ == "__main__":
